@@ -20,6 +20,8 @@ from kdnn import QKNet
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
+    total_loss = 0.0
+    count_batch = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
@@ -34,6 +36,10 @@ def train(args, model, device, train_loader, optimizer, epoch):
                        100. * batch_idx / len(train_loader), loss.item()))
             # np.save('center_dict.npy', model.center_dict)
             # np.save('table_dict.npy', model.table_dict)
+        total_loss += loss.item()
+        count_batch += 1
+    print('Train Epoch: {} \t\t\t\tAverage Loss: {:.6f}'.format(
+        epoch, total_loss / count_batch))
 
 
 def test(args, model, device, test_loader):
@@ -106,7 +112,7 @@ def main():
     # model.load_state_dict(state['state_dict'])
     # model.set_center(state['center'], state['table'])
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-    scheduler = MultiStepLR(optimizer, milestones=[3, 6, 12], gamma=0.1)
+    scheduler = MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)
     training_time = 0.
     for epoch in range(1, args.epochs + 1):
         start = timer()

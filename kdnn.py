@@ -13,7 +13,7 @@ import torch
 import random
 from scipy import spatial
 # ALPHA = 1. - 1./60000
-ALPHA = 0.9
+ALPHA = 0.999
 VECTOR_SIMILARITY_METRICS = 'cosine'
 # VECTOR_SIMILARITY_METRICS = 'Euclid'
 THRESHOLD = 0

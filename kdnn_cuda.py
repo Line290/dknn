@@ -14,16 +14,16 @@ import random
 from scipy import spatial
 import time
 # ALPHA = 1. - 1./60000
-ALPHA = 0.9
-VECTOR_SIMILARITY_METRICS = 'cosine'
-# VECTOR_SIMILARITY_METRICS = 'Euclid'
+ALPHA = 0.99
+# VECTOR_SIMILARITY_METRICS = 'cosine'
+VECTOR_SIMILARITY_METRICS = 'Euclid'
 THRESHOLD = 10
 
 class QKNet(nn.Module):
     def __init__(self, input_sizes=(None, 1, 28, 28),
-                 hidden_channel_dims = [32, 32, 64, 7*7*64, 1024],
-                 kernel_sizes = [5, 5, 5],
-                 hidden_out_dims = [14, 14, 7],
+                 hidden_channel_dims = [32, 64, 7*7*64, 1024],
+                 kernel_sizes = [5, 5],
+                 hidden_out_dims = [14, 7],
                  nb_class=10,
                  nb_k_center=200,
                  device='cpu',
@@ -54,18 +54,19 @@ class QKNet(nn.Module):
                                self.hidden_channel_dims[1],
                                self.kernel_sizes[1],
                                padding=2)
-        self.conv3 = nn.Conv2d(self.hidden_channel_dims[1],
-                               self.hidden_channel_dims[2],
-                               self.kernel_sizes[2],
-                               padding=2)
+        # self.conv3 = nn.Conv2d(self.hidden_channel_dims[1],
+        #                        self.hidden_channel_dims[2],
+        #                        self.kernel_sizes[2],
+        #                        padding=2)
         # self.conv4 = nn.Conv2d(self.hidden_channel_dims[2],
         #                        self.hidden_channel_dims[3],
         #                        self.kernel_sizes[3],
         #                        padding=2)
-        self.fc1 = nn.Linear(self.hidden_channel_dims[3], self.hidden_channel_dims[4])
-        self.fc2 = nn.Linear(self.hidden_channel_dims[4], self.nb_class)
+        self.fc1 = nn.Linear(self.hidden_channel_dims[-2], self.hidden_channel_dims[-1])
+        self.fc2 = nn.Linear(self.hidden_channel_dims[-1], self.nb_class)
         self.max_pool2d = nn.MaxPool2d(2)
         self.relu = nn.ReLU()
+        # self.prelu = nn.PReLU()
         # self.softmax = nn.LogSoftmax(dim=-1)
         self.NN_Q = self.NN_quantization.apply
 
@@ -100,11 +101,11 @@ class QKNet(nn.Module):
 
             if mode == 'test':
                 # set invalid center's cosine distance as 1
-                if 'cosine' in VECTOR_SIMILARITY_METRICS:
-                    cos_dist[:, table_dict[layer_idx].squeeze(-1) < THRESHOLD] = 1.
-                elif 'Euclid' in VECTOR_SIMILARITY_METRICS:
-                    cos_dist[:, table_dict[layer_idx].squeeze(-1) < THRESHOLD] = 1e10
-
+                # if 'cosine' in VECTOR_SIMILARITY_METRICS:
+                #     cos_dist[:, table_dict[layer_idx].squeeze(-1) < THRESHOLD] = 1.
+                # elif 'Euclid' in VECTOR_SIMILARITY_METRICS:
+                #     cos_dist[:, table_dict[layer_idx].squeeze(-1) < THRESHOLD] = 1e10
+                pass
             indices = torch.argmin(cos_dist, dim=-1, keepdim=False)  # shape: (b_s, c_s)
 
             # update center
@@ -143,6 +144,12 @@ class QKNet(nn.Module):
                 center_dict[layer_idx] = center_dict[layer_idx] * ALPHA + (1 - ALPHA) * tmp_center
                 center_dict[layer_idx] = F.normalize(center_dict[layer_idx], p=2, dim=-1)
                 table_dict[layer_idx] += count
+
+                # mean center
+                # print(center_dict[layer_idx].size(), table_dict[layer_idx].unsqueeze(dim=-1).size(), tmp_sum_center.size())
+                # center_dict[layer_idx] = center_dict[layer_idx] * table_dict[layer_idx].float() + tmp_sum_center
+                # table_dict[layer_idx] += count
+                # center_dict[layer_idx] = center_dict[layer_idx] / (table_dict[layer_idx].float() + 1e-12)
 
                 #####################################
                 ########       naive       ##########
@@ -226,12 +233,13 @@ class QKNet(nn.Module):
         x = self.knn_layer(x, layer_idx=0)
 
         x = self.relu(self.conv2(x))
+        x = self.max_pool2d(x)
         x = self.knn_layer(x, layer_idx=1)
 
-        x = self.relu(self.conv3(x))
-        x = self.max_pool2d(x)
-        x = self.knn_layer(x, layer_idx=2)
-
+        # x = self.relu(self.conv3(x))
+        # x = self.max_pool2d(x)
+        # x = self.knn_layer(x, layer_idx=2)
+        #
         # x = self.relu(self.conv4(x))
         # x = self.knn_layer(x, layer_idx=3)
 
