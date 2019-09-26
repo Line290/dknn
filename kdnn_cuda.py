@@ -27,7 +27,6 @@ class QKNet(nn.Module):
                  nb_class=10,
                  nb_k_center=200,
                  device='cpu',
-                 mode='train',
                  keep_center_id=False):
         super(QKNet, self).__init__()
         self.nb_channel = input_sizes[1]
@@ -39,7 +38,6 @@ class QKNet(nn.Module):
         self.nb_class = nb_class
         self.nb_k_center = nb_k_center
         self.device = device
-        self.mode = mode
         self.keep_center_id = keep_center_id
         # center_dict: keep each layer's feature centers
         # table_dict: count number of feature vectors which belongs to a specific center
@@ -83,8 +81,8 @@ class QKNet(nn.Module):
 
     class NN_quantization(Function):
         @staticmethod
-        def forward(ctx, input, layer_idx, device, mode, keep_center_id, center_dict, table_dict, center_id_saver):
-            # feature map, shape (batch_size, channel_size, height, width)
+        def forward(ctx, input, layer_idx, device, training, keep_center_id, center_dict, table_dict, center_id_saver):
+            # feature map, shape (batch_size, nb_channel, height, width)
             # center, shape (nb_channel, nb_k_center, height*width)
             # table, shape (nb_channel, nb_k_center, 1)
             nb_channel, nb_k_center, feat_dim = center_dict[layer_idx].size()
@@ -98,8 +96,8 @@ class QKNet(nn.Module):
                 # cos_dist = torch.einsum("abc,cd->abd", (input, center.transpose(0, 1)))
             elif 'Euclid' in VECTOR_SIMILARITY_METRICS:
                 cos_dist = torch.sum((torch.unsqueeze(input, dim=2) - center_dict[layer_idx]) ** 2, dim=-1)
-
-            if mode == 'test':
+                
+            if training is False:
                 # set invalid center's cosine distance as 1
                 # if 'cosine' in VECTOR_SIMILARITY_METRICS:
                 #     cos_dist[:, table_dict[layer_idx].squeeze(-1) < THRESHOLD] = 1.
@@ -124,7 +122,7 @@ class QKNet(nn.Module):
             #     np.save('table.npy', table)
             #     # np.save('table.npy', table)
 
-            if mode == 'train':
+            if training:
                 #####################################
                 ########   vectorization   ##########
                 #####################################
@@ -139,17 +137,19 @@ class QKNet(nn.Module):
                 tmp_center = tmp_center.permute(1, 2, 0, 3)
                 tmp_sum_center = tmp_center.sum(dim=-2)
                 count = ((tmp_center.sum(dim=-1) > 0.).int()).sum(dim=-1, keepdim=True)
-                tmp_center = tmp_sum_center / (count.float() + 1e-12)
 
-                center_dict[layer_idx] = center_dict[layer_idx] * ALPHA + (1 - ALPHA) * tmp_center
-                center_dict[layer_idx] = F.normalize(center_dict[layer_idx], p=2, dim=-1)
-                table_dict[layer_idx] += count
 
-                # mean center
-                # print(center_dict[layer_idx].size(), table_dict[layer_idx].unsqueeze(dim=-1).size(), tmp_sum_center.size())
-                # center_dict[layer_idx] = center_dict[layer_idx] * table_dict[layer_idx].float() + tmp_sum_center
+                # moving average center
+                # tmp_center = tmp_sum_center / (count.float() + 1e-12)
+                # center_dict[layer_idx] = center_dict[layer_idx] * ALPHA + (1 - ALPHA) * tmp_center
+                # center_dict[layer_idx] = F.normalize(center_dict[layer_idx], p=2, dim=-1)
                 # table_dict[layer_idx] += count
-                # center_dict[layer_idx] = center_dict[layer_idx] / (table_dict[layer_idx].float() + 1e-12)
+
+                # average center
+                # print(center_dict[layer_idx].size(), table_dict[layer_idx].unsqueeze(dim=-1).size(), tmp_sum_center.size())
+                center_dict[layer_idx] = center_dict[layer_idx] * table_dict[layer_idx].float() + tmp_sum_center
+                table_dict[layer_idx] += count
+                center_dict[layer_idx] = center_dict[layer_idx] / (table_dict[layer_idx].float() + 1e-12)
 
                 #####################################
                 ########       naive       ##########
@@ -176,13 +176,12 @@ class QKNet(nn.Module):
                 #     np.save('new_table.npy', table_dict[layer_idx].cpu().numpy())
                 #     print('save all')
                 #     time.sleep(5)
-            elif mode == 'test':
+            else:
+                # print('testing')
                 if keep_center_id:
                     center_id_saver.append(indices)
                 else:
                     pass
-            else:
-                pass
 
             result = center_dict[layer_idx][range(nb_channel), indices]
             # ctx.save_for_backward(ctx, input)
@@ -217,7 +216,7 @@ class QKNet(nn.Module):
         # quantize
         x = self.NN_Q(x, layer_idx,
                       self.device,
-                      self.mode,
+                      self.training,
                       self.keep_center_id,
                       self.center_dict,
                       self.table_dict,
